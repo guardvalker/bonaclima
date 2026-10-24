@@ -74,7 +74,7 @@ fun WeatherApp(vm: WeatherViewModel) {
     MaterialTheme(colorScheme = darkColorScheme()) {
         val state by vm.state.collectAsStateWithLifecycle()
         var searching by rememberSaveable { mutableStateOf(false) }
-        LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { vm.refreshIfStale() }
+        LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { vm.refreshIfStale(); vm.checkForAppUpdate() }
 
         Box(Modifier.fillMaxSize()) {
             WeatherBackground(skyFor(state.forecast))
@@ -87,7 +87,7 @@ fun WeatherApp(vm: WeatherViewModel) {
                     onClose = { searching = false },
                 )
             } else {
-                MainContent(state, onSearch = { searching = true }, onRefresh = vm::refresh)
+                MainContent(state, vm.version, onSearch = { searching = true }, onRefresh = vm::refresh)
             }
         }
     }
@@ -95,7 +95,7 @@ fun WeatherApp(vm: WeatherViewModel) {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun MainContent(state: UiState, onSearch: () -> Unit, onRefresh: () -> Unit) {
+private fun MainContent(state: UiState, version: String, onSearch: () -> Unit, onRefresh: () -> Unit) {
     PullToRefreshBox(isRefreshing = state.refreshing, onRefresh = onRefresh, modifier = Modifier.fillMaxSize()) {
         Column(
             Modifier.fillMaxSize().verticalScroll(rememberScrollState()).statusBarsPadding().navigationBarsPadding()
@@ -123,7 +123,7 @@ private fun MainContent(state: UiState, onSearch: () -> Unit, onRefresh: () -> U
                 Reveal(2) { DailyCard(f) }
                 Reveal(3) { DetailsGrid(f) }
                 Text(
-                    "Datos: Open-Meteo · actualizado ${updatedAgo(f)}", color = Color.White.copy(alpha = 0.55f),
+                    "BonaClima v$version · Datos: Open-Meteo · actualizado ${updatedAgo(f)}", color = Color.White.copy(alpha = 0.55f),
                     fontSize = 11.sp, modifier = Modifier.fillMaxWidth(), textAlign = TextAlign.Center,
                 )
             }

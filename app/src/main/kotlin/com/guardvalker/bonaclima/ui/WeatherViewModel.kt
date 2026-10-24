@@ -6,6 +6,7 @@ import android.content.Context
 import android.location.LocationManager
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.guardvalker.bonaclima.data.AppUpdater
 import com.guardvalker.bonaclima.data.DEFAULT_PLACE
 import com.guardvalker.bonaclima.data.WeatherRepository
 import com.guardvalker.bonaclima.domain.Forecast
@@ -26,6 +27,8 @@ data class UiState(
 
 class WeatherViewModel(app: Application) : AndroidViewModel(app) {
     private val repo = WeatherRepository(app)
+    private val updater = AppUpdater(app)
+    val version: String = updater.currentVersion
     private val _state = MutableStateFlow(UiState())
     val state: StateFlow<UiState> = _state
 
@@ -53,6 +56,11 @@ class WeatherViewModel(app: Application) : AndroidViewModel(app) {
                 _state.update { it.copy(refreshing = false, error = "No se pudo actualizar (${e.message ?: "sin conexión"})") }
             }
         }
+    }
+
+    /** Revisa si hay un release nuevo en GitHub (como máximo una vez por hora) y lo instala. */
+    fun checkForAppUpdate() {
+        viewModelScope.launch { runCatching { updater.checkAndInstall() } }
     }
 
     fun refreshIfStale() {
