@@ -2,6 +2,7 @@ package com.guardvalker.bonaclima.ui
 
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.lerp
+import androidx.compose.ui.graphics.luminance
 import com.guardvalker.bonaclima.domain.Condition
 import com.guardvalker.bonaclima.domain.Forecast
 import java.time.Duration
@@ -16,19 +17,13 @@ data class SkyState(
     val daylight: Float,
 )
 
-private val NIGHT_TOP = Color(0xFF070B1F)
-private val NIGHT_BOTTOM = Color(0xFF1B2850)
-private val DAY_TOP = Color(0xFF1E78D6)
-private val DAY_BOTTOM = Color(0xFF7CC4FF)
-private val TWI_TOP = Color(0xFF3A2A6E)
-private val TWI_BOTTOM = Color(0xFFFF9466)
-private val GREY_TOP = Color(0xFF4A5565)
-private val GREY_BOTTOM = Color(0xFF8795A6)
-
 private const val RAMP_MIN = 45f
 
-fun skyFor(forecast: Forecast?): SkyState {
-    val cur = forecast?.current ?: return SkyState(NIGHT_TOP, NIGHT_BOTTOM, Condition.Clear, 0f)
+private val INK_DARK = Color(0xFF2E1D10)
+private val INK_LIGHT = Color(0xFFFBF1DA)
+
+fun skyFor(forecast: Forecast?, style: BonaStyle): SkyState {
+    val cur = forecast?.current ?: return SkyState(style.nightTop, style.nightBottom, Condition.Clear, 0f)
     val today = forecast.daily.firstOrNull { it.date == cur.time.toLocalDate() }
     val sunrise = today?.sunrise
     val sunset = today?.sunset
@@ -38,8 +33,7 @@ fun skyFor(forecast: Forecast?): SkyState {
     if (sunrise != null && sunset != null) {
         val dRise = minutes(sunrise, cur.time) // minutos desde el amanecer
         val dSet = minutes(cur.time, sunset) // minutos hasta el atardecer
-        val up = smooth(dRise / RAMP_MIN + 0.5f) * smooth(dSet / RAMP_MIN + 0.5f)
-        daylight = up
+        daylight = smooth(dRise / RAMP_MIN + 0.5f) * smooth(dSet / RAMP_MIN + 0.5f)
         val nearHorizon = minOf(kotlin.math.abs(dRise), kotlin.math.abs(dSet))
         twilight = (1f - nearHorizon / RAMP_MIN).coerceIn(0f, 1f)
     } else {
@@ -47,10 +41,10 @@ fun skyFor(forecast: Forecast?): SkyState {
         twilight = 0f
     }
 
-    var top = lerp(NIGHT_TOP, DAY_TOP, daylight)
-    var bottom = lerp(NIGHT_BOTTOM, DAY_BOTTOM, daylight)
-    top = lerp(top, TWI_TOP, twilight * 0.75f)
-    bottom = lerp(bottom, TWI_BOTTOM, twilight * 0.75f)
+    var top = lerp(style.nightTop, style.dayTop, daylight)
+    var bottom = lerp(style.nightBottom, style.dayBottom, daylight)
+    top = lerp(top, style.twiTop, twilight * 0.75f)
+    bottom = lerp(bottom, style.twiBottom, twilight * 0.75f)
 
     val gray = when (cur.condition) {
         Condition.Clear -> 0f
@@ -62,10 +56,18 @@ fun skyFor(forecast: Forecast?): SkyState {
         Condition.Thunderstorm -> 0.85f
     }
     // El gris se oscurece de noche para no quedar un cielo "lavado".
-    val greyTop = lerp(Color(0xFF0E131C), GREY_TOP, daylight)
-    val greyBottom = lerp(Color(0xFF263042), GREY_BOTTOM, daylight)
+    val greyBottom = lerp(style.nightBottom, style.overcast, daylight)
+    val greyTop = lerp(greyBottom, style.nightTop, 0.35f)
     return SkyState(lerp(top, greyTop, gray), lerp(bottom, greyBottom, gray), cur.condition, daylight)
 }
+
+/** Tinta oscura o clara, la que mejor contraste tenga con el cielo actual. */
+fun heroInk(sky: SkyState): Color {
+    val mid = lerp(sky.top, sky.bottom, 0.5f).luminance()
+    return if (contrast(mid, INK_DARK.luminance()) >= contrast(mid, INK_LIGHT.luminance())) INK_DARK else INK_LIGHT
+}
+
+private fun contrast(a: Float, b: Float) = (maxOf(a, b) + 0.05f) / (minOf(a, b) + 0.05f)
 
 private fun minutes(from: LocalDateTime, to: LocalDateTime) = Duration.between(from, to).toMinutes().toFloat()
 private fun smooth(x: Float): Float {

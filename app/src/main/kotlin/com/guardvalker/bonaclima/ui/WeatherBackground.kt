@@ -15,6 +15,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.ui.graphics.lerp
 import com.guardvalker.bonaclima.domain.Condition
 import kotlin.math.PI
 import kotlin.math.floor
@@ -31,7 +32,7 @@ private fun particles(n: Int, seed: Int) = Random(seed).let { r ->
 
 /** Cielo animado: degradé + estrellas/sol/luna, nubes, lluvia, nieve, niebla y rayos según la condición. Todo se calcula del tiempo (sin estado por partícula). */
 @Composable
-fun WeatherBackground(sky: SkyState, modifier: Modifier = Modifier) {
+fun WeatherBackground(sky: SkyState, style: BonaStyle, ink: Color, modifier: Modifier = Modifier) {
     var t by remember { mutableFloatStateOf(0f) }
     LaunchedEffect(Unit) {
         val start = withFrameNanos { it }
@@ -46,11 +47,16 @@ fun WeatherBackground(sky: SkyState, modifier: Modifier = Modifier) {
     Canvas(modifier.fillMaxSize()) {
         drawRect(Brush.verticalGradient(listOf(sky.top, sky.bottom)))
         val c = sky.condition
+        val stormy = c == Condition.Thunderstorm || c == Condition.Rain
+        val cloudTint = when {
+            stormy -> lerp(style.overcast, Color(0xFF2A1D16), 0.55f)
+            else -> lerp(lerp(style.nightBottom, style.cloud, 0.45f), style.cloud, sky.daylight)
+        }
         val night = 1f - sky.daylight
 
         if (c == Condition.Clear || c == Condition.PartlyCloudy) {
             if (night > 0.05f) drawStars(stars, t, night)
-            drawCelestial(sky.daylight, t)
+            drawCelestial(sky.daylight, t, sky.top)
         }
         val cloudCount = when (c) {
             Condition.Clear -> 2
@@ -58,14 +64,14 @@ fun WeatherBackground(sky: SkyState, modifier: Modifier = Modifier) {
             Condition.Fog -> 3
             else -> 10
         }
-        drawClouds(clouds.take(cloudCount), t, sky.daylight, dark = c == Condition.Thunderstorm || c == Condition.Rain)
+        drawClouds(clouds.take(cloudCount), t, cloudTint, stormy)
 
         when (c) {
-            Condition.Rain -> drawRain(drops.take(130), t, 1f)
-            Condition.Drizzle -> drawRain(drops.take(60), t, 0.6f)
-            Condition.Thunderstorm -> { drawRain(drops, t, 1.2f); drawLightning(t) }
+            Condition.Rain -> drawRain(drops.take(130), t, 1f, ink)
+            Condition.Drizzle -> drawRain(drops.take(60), t, 0.6f, ink)
+            Condition.Thunderstorm -> { drawRain(drops, t, 1.2f, ink); drawLightning(t) }
             Condition.Snow -> drawSnow(flakes, t)
-            Condition.Fog -> drawFog(bands, t, sky.daylight)
+            Condition.Fog -> drawFog(bands, t, style.cloud.copy(alpha = 1f))
             else -> {}
         }
     }
@@ -75,14 +81,14 @@ private fun DrawScope.drawStars(stars: List<Particle>, t: Float, night: Float) {
     for (s in stars) {
         val twinkle = 0.5f + 0.5f * sin(t * (0.8f + s.speed) + s.phase)
         drawCircle(
-            Color.White.copy(alpha = (night * (0.25f + 0.65f * twinkle)).coerceIn(0f, 1f)),
+            Color(0xFFFFF4DC).copy(alpha = (night * (0.25f + 0.65f * twinkle)).coerceIn(0f, 1f)),
             radius = (0.6f + s.size * 1.4f) * density,
             center = Offset(s.x * size.width, s.y * size.height * 0.6f),
         )
     }
 }
 
-private fun DrawScope.drawCelestial(daylight: Float, t: Float) {
+private fun DrawScope.drawCelestial(daylight: Float, t: Float, skyTop: Color) {
     val center = Offset(size.width * 0.78f, size.height * 0.16f)
     val pulse = 1f + 0.06f * sin(t * 0.9f)
     if (daylight > 0.3f) {
@@ -96,15 +102,13 @@ private fun DrawScope.drawCelestial(daylight: Float, t: Float) {
     } else {
         val a = (1f - daylight / 0.3f).coerceIn(0f, 1f)
         val r = size.width * 0.28f * pulse
-        drawCircle(Brush.radialGradient(listOf(Color(0xFFDDE6FF).copy(alpha = 0.35f * a), Color.Transparent), center, r), r, center)
-        drawCircle(Color(0xFFF2F5FF).copy(alpha = 0.95f * a), 20f * density, center)
-        drawCircle(Color(0xFF1B2850).copy(alpha = 0.55f * a), 18f * density, center + Offset(9f * density, -4f * density))
+        drawCircle(Brush.radialGradient(listOf(Color(0xFFFFF0D0).copy(alpha = 0.35f * a), Color.Transparent), center, r), r, center)
+        drawCircle(Color(0xFFFFF4DC).copy(alpha = 0.95f * a), 20f * density, center)
+        drawCircle(skyTop.copy(alpha = 0.85f * a), 18f * density, center + Offset(9f * density, -4f * density))
     }
 }
 
-private fun DrawScope.drawClouds(clouds: List<Particle>, t: Float, daylight: Float, dark: Boolean) {
-    val base = if (dark) Color(0xFF2C3442) else Color.White
-    val tint = androidx.compose.ui.graphics.lerp(Color(0xFF8C97B5), base, daylight)
+private fun DrawScope.drawClouds(clouds: List<Particle>, t: Float, tint: Color, dark: Boolean) {
     for (c in clouds) {
         val span = size.width * 1.6f
         val cx = fract(c.x + t * 0.012f * c.speed) * span - size.width * 0.3f
@@ -121,14 +125,14 @@ private fun DrawScope.drawClouds(clouds: List<Particle>, t: Float, daylight: Flo
     }
 }
 
-private fun DrawScope.drawRain(drops: List<Particle>, t: Float, intensity: Float) {
+private fun DrawScope.drawRain(drops: List<Particle>, t: Float, intensity: Float, ink: Color) {
     val len = 16f * density * (0.8f + intensity * 0.3f)
     for (d in drops) {
         val fall = fract(d.y + t * (0.9f + d.speed * 0.7f))
         val y = fall * (size.height + len) - len
         val x = fract(d.x + fall * 0.08f) * size.width
         drawLine(
-            Color(0xFFCFE3FF).copy(alpha = 0.35f + 0.25f * d.size),
+            ink.copy(alpha = 0.35f + 0.25f * d.size),
             Offset(x, y), Offset(x - len * 0.18f, y + len),
             strokeWidth = (1f + d.size) * density * 0.8f, cap = StrokeCap.Round,
         )
@@ -139,12 +143,11 @@ private fun DrawScope.drawSnow(flakes: List<Particle>, t: Float) {
     for (f in flakes) {
         val fall = fract(f.y + t * 0.06f * (0.5f + f.speed))
         val x = (f.x + 0.025f * sin(t * 0.7f * f.speed + f.phase)).let { fract(it) } * size.width
-        drawCircle(Color.White.copy(alpha = 0.55f + 0.4f * f.size), (1.5f + f.size * 3f) * density, Offset(x, fall * size.height))
+        drawCircle(Color(0xFFFFF8E8).copy(alpha = 0.7f + 0.3f * f.size), (1.5f + f.size * 3f) * density, Offset(x, fall * size.height))
     }
 }
 
-private fun DrawScope.drawFog(bands: List<Particle>, t: Float, daylight: Float) {
-    val col = androidx.compose.ui.graphics.lerp(Color(0xFF8C97B5), Color.White, daylight)
+private fun DrawScope.drawFog(bands: List<Particle>, t: Float, col: Color) {
     for (b in bands) {
         val h = size.height * 0.16f
         val y = size.height * (0.15f + b.y * 0.7f)

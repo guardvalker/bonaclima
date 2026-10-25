@@ -34,11 +34,17 @@ class AppUpdater(context: Context) {
     val currentVersion: String =
         this.context.packageManager.getPackageInfo(this.context.packageName, 0).versionName ?: "0"
 
-    /** @return la versión instalada si hubo actualización en curso, null si no hacía falta. */
-    suspend fun checkAndInstall(force: Boolean = false): String? {
+    sealed interface Result {
+        /** No se consultó (revisado hace poco o ya hay una actualización en curso). */
+        data object Skipped : Result
+        data object UpToDate : Result
+        data class Installing(val version: String) : Result
+    }
+
+    suspend fun checkAndInstall(force: Boolean = false): Result {
         val now = System.currentTimeMillis()
-        if (!force && now - prefs.getLong("last_check", 0L) < CHECK_EVERY_MS) return null
-        if (!busy.compareAndSet(false, true)) return null
+        if (!force && now - prefs.getLong("last_check", 0L) < CHECK_EVERY_MS) return Result.Skipped
+        if (!busy.compareAndSet(false, true)) return Result.Skipped
         try {
             val release = json.decodeFromString<ReleaseDto>(httpGet("https://api.github.com/repos/$GITHUB_REPO/releases/latest"))
             prefs.edit().putLong("last_check", now).apply()
@@ -46,12 +52,12 @@ class AppUpdater(context: Context) {
             val asset = release.assets.firstOrNull { it.name.endsWith(".apk") }
             if (asset == null || !isNewer(latest, currentVersion)) {
                 busy.set(false)
-                return null
+                return Result.UpToDate
             }
             val apk = File(context.cacheDir, "update.apk")
             download(asset.url, apk)
             install(apk)
-            return latest
+            return Result.Installing(latest)
         } catch (e: Exception) {
             busy.set(false)
             throw e

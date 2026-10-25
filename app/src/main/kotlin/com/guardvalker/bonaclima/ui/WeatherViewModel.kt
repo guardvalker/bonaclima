@@ -23,13 +23,18 @@ data class UiState(
     val refreshing: Boolean = false,
     val error: String? = null,
     val searchResults: List<Place> = emptyList(),
+    val styleId: String = STYLES.first().id,
+    /** Mensaje de la última búsqueda de actualización de la app (null = nada que mostrar). */
+    val updateStatus: String? = null,
+    val checkingUpdate: Boolean = false,
 )
 
 class WeatherViewModel(app: Application) : AndroidViewModel(app) {
     private val repo = WeatherRepository(app)
     private val updater = AppUpdater(app)
     val version: String = updater.currentVersion
-    private val _state = MutableStateFlow(UiState())
+    private val uiPrefs = app.getSharedPreferences("ui", Context.MODE_PRIVATE)
+    private val _state = MutableStateFlow(UiState(styleId = styleById(uiPrefs.getString("style", null)).id))
     val state: StateFlow<UiState> = _state
 
     private var refreshJob: Job? = null
@@ -58,9 +63,31 @@ class WeatherViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    /** Revisa si hay un release nuevo en GitHub (como máximo una vez por hora) y lo instala. */
-    fun checkForAppUpdate() {
-        viewModelScope.launch { runCatching { updater.checkAndInstall() } }
+    fun setStyle(id: String) {
+        uiPrefs.edit().putString("style", id).apply()
+        _state.update { it.copy(styleId = id) }
+    }
+
+    /**
+     * Revisa si hay un release nuevo en GitHub y lo instala. Automático: como máximo una vez por hora y en silencio.
+     * Manual (desde Ajustes): siempre consulta y deja el resultado en [UiState.updateStatus].
+     */
+    fun checkForAppUpdate(manual: Boolean = false) {
+        if (manual && _state.value.checkingUpdate) return
+        viewModelScope.launch {
+            if (manual) _state.update { it.copy(checkingUpdate = true, updateStatus = "Buscando…") }
+            val status = try {
+                when (val r = updater.checkAndInstall(force = manual)) {
+                    is AppUpdater.Result.Installing -> "Actualizando a v${r.version}…"
+                    AppUpdater.Result.UpToDate -> "Ya tenés la última versión (v$version)"
+                    AppUpdater.Result.Skipped -> if (manual) "Ya hay una búsqueda en curso" else null
+                }
+            } catch (e: Exception) {
+                if (e is kotlinx.coroutines.CancellationException) throw e
+                if (manual) "No se pudo comprobar (${e.message ?: "sin conexión"})" else null
+            }
+            _state.update { it.copy(checkingUpdate = false, updateStatus = status ?: it.updateStatus) }
+        }
     }
 
     fun refreshIfStale() {
