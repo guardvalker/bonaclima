@@ -96,11 +96,11 @@ private val C_NIGHT = Color(0xFF4F3C3E)
 private val INK_DARK = Color(0xFF2B2420)
 private val INK_CREAM = Color(0xFFFFF3DE)
 
-private enum class Period(val label: String, val color: Color, val repHour: Float) {
-    Morning("Mañana", C_MORNING, 9f),
-    Afternoon("Tarde", C_AFTERNOON, 15f),
-    Dusk("Tardecita", C_DUSK, 19.5f),
-    Night("Noche", C_NIGHT, 23f),
+private enum class Period(val label: String, val range: String, val color: Color, val repHour: Float) {
+    Morning("Mañana", "6–12 h", C_MORNING, 9f),
+    Afternoon("Tarde", "12–18 h", C_AFTERNOON, 15f),
+    Dusk("Tardecita", "18–21 h", C_DUSK, 19.5f),
+    Night("Noche", "21–6 h", C_NIGHT, 23f),
 }
 
 private fun periodIndex(hour: Float) = when {
@@ -259,7 +259,7 @@ fun BandsMain(state: UiState, version: String, style: BonaStyle, onSearch: () ->
                                 Panel(i1, momentOf(i1), f, i1 != currentIdx, hourOf(i1), clock, Modifier.fillMaxSize().clipBand(1f - fr, 1f)) { goTo(currentIdx) }
                             }
                         }
-                        Selector(f, dominant, Modifier.width(52.dp).fillMaxSize()) { goTo(it) }
+                        Selector(f, dominant, Modifier.width(62.dp).fillMaxSize()) { goTo(it) }
                     }
                     Column(Modifier.padding(horizontal = 16.dp, vertical = 16.dp).navigationBarsPadding(), verticalArrangement = Arrangement.spacedBy(16.dp)) {
                         HourlyCard(f, style)
@@ -323,11 +323,19 @@ private fun Selector(f: Forecast, active: Int, modifier: Modifier, onPick: (Int)
             val ink = inkOn(p.color)
             val on = i == active
             Column(
-                Modifier.weight(1f).fillMaxWidth().background(p.color).clickable { onPick(i) },
+                Modifier.weight(1f).fillMaxWidth().background(p.color).clickable { onPick(i) }.padding(horizontal = 3.dp),
                 horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center,
             ) {
-                Text("${momentAt(f, p.repHour).temp.roundToInt()}°", fontSize = if (on) 15.sp else 12.sp, fontWeight = if (on) FontWeight.Bold else FontWeight.Normal, color = ink.copy(alpha = if (on) 1f else 0.7f))
-                Box(Modifier.padding(top = 4.dp).size(if (on) 6.dp else 0.dp).background(ink, RoundedCornerShape(50)))
+                val a = if (on) 1f else 0.7f
+                Text(
+                    p.label.uppercase(AR), fontSize = if (p.label.length > 7) 8.sp else 9.sp, letterSpacing = 0.3.sp, fontWeight = FontWeight.Bold,
+                    color = ink.copy(alpha = a), maxLines = 1, softWrap = false,
+                )
+                Text(
+                    "${momentAt(f, p.repHour).temp.roundToInt()}°", fontSize = if (on) 17.sp else 14.sp,
+                    fontWeight = if (on) FontWeight.Bold else FontWeight.Normal, color = ink.copy(alpha = a),
+                )
+                Text(p.range, fontSize = 9.sp, color = ink.copy(alpha = a * 0.85f), maxLines = 1, softWrap = false)
             }
         }
     }
