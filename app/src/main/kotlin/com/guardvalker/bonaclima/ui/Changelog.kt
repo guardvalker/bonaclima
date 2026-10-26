@@ -5,6 +5,12 @@ class ChangelogEntry(val version: String, val date: String, val items: List<Stri
 /** Historial de cambios que muestra la app. Agregar una entrada arriba en cada release. */
 val CHANGELOG = listOf(
     ChangelogEntry(
+        "0.3.4", "2026-10-25",
+        listOf(
+            "Franjas: al arrastrar despacio sobre las franjas ya no se mueve toda la pantalla (el gesto se toma antes que el scroll).",
+        ),
+    ),
+    ChangelogEntry(
         "0.3.3", "2026-10-25",
         listOf(
             "Franjas con snap: un gesto sobre las franjas mueve el módulo abierto a la franja contigua (se acompaña un poco con el dedo y luego salta solo).",

@@ -11,7 +11,9 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.detectVerticalDragGestures
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -200,32 +202,45 @@ fun BandsMain(state: UiState, version: String, style: BonaStyle, onSearch: () ->
                     // Deslizar sobre las franjas "corre" el módulo abierto: un gesto mueve solo hasta la franja contigua, con snap.
                     Column(
                         Modifier.fillMaxWidth().pointerInput(currentIdx, nowHour) {
-                            var acc = 0f
-                            var fired = false
-                            detectVerticalDragGestures(
-                                onDragStart = { acc = 0f; fired = false },
-                                onDragEnd = { if (!fired) select(selected ?: currentIdx) },
-                                onDragCancel = { if (!fired) select(selected ?: currentIdx) },
-                            ) { change, dy ->
-                                change.consume()
-                                hinted = true
-                                if (fired) return@detectVerticalDragGestures
-                                acc += dy
-                                val base = selected ?: currentIdx
-                                // Dedo hacia abajo = franja anterior, hacia arriba = la siguiente.
-                                val dir = if (acc > 0) -1 else 1
-                                val target = base + dir
-                                if (kotlin.math.abs(acc) >= thresholdPx && target in 0..3) {
-                                    fired = true
-                                    select(target)
-                                } else if (target in 0..3) {
-                                    val k = (kotlin.math.abs(acc) / thresholdPx).coerceIn(0f, 1f) * STEP
-                                    val h0 = hourOf(base)
-                                    scope.launch {
-                                        if (selected == null) { selected = base; hourAnim.snapTo(h0) }
-                                        hourAnim.snapTo(h0 + (hourOf(target) - h0) * k)
+                            awaitEachGesture {
+                                val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+                                val slop = viewConfiguration.touchSlop
+                                var total = 0f
+                                var acc = 0f
+                                var dragging = false
+                                var fired = false
+                                while (true) {
+                                    val ev = awaitPointerEvent(PointerEventPass.Initial)
+                                    val ch = ev.changes.firstOrNull { it.id == down.id } ?: break
+                                    if (!ch.pressed) break
+                                    val dy = ch.position.y - ch.previousPosition.y
+                                    if (!dragging) {
+                                        total += dy
+                                        if (kotlin.math.abs(total) <= slop) continue
+                                        dragging = true
+                                        hinted = true
+                                        acc = total
+                                    } else acc += dy
+                                    // Se consume en la pasada inicial: la pantalla no scrollea mientras se arrastra sobre las franjas.
+                                    ch.consume()
+                                    if (fired) continue
+                                    val base = selected ?: currentIdx
+                                    // Dedo hacia abajo = franja anterior, hacia arriba = la siguiente.
+                                    val target = base + if (acc > 0) -1 else 1
+                                    if (target !in 0..3) continue
+                                    if (kotlin.math.abs(acc) >= thresholdPx) {
+                                        fired = true
+                                        select(target)
+                                    } else {
+                                        val k = (kotlin.math.abs(acc) / thresholdPx).coerceIn(0f, 1f) * STEP
+                                        val h0 = hourOf(base)
+                                        scope.launch {
+                                            if (selected == null) { selected = base; hourAnim.snapTo(h0) }
+                                            hourAnim.snapTo(h0 + (hourOf(target) - h0) * k)
+                                        }
                                     }
                                 }
+                                if (dragging && !fired) select(selected ?: currentIdx)
                             }
                         },
                     ) {
