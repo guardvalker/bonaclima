@@ -133,6 +133,8 @@ private fun hourLabel(hour: Float): String {
     return "%02d:%02d".format(h, m)
 }
 
+private val STEP = 0.35f
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun BandsMain(state: UiState, version: String, style: BonaStyle, onSearch: () -> Unit, onSettings: () -> Unit, onRefresh: () -> Unit) {
@@ -140,84 +142,114 @@ fun BandsMain(state: UiState, version: String, style: BonaStyle, onSearch: () ->
     val clock = rememberInfiniteTransition(label = "clock").animateFloat(
         0f, 100_000f, infiniteRepeatable(tween(100_000_000, easing = LinearEasing), RepeatMode.Restart), label = "t",
     )
-    PullToRefreshBox(isRefreshing = state.refreshing, onRefresh = onRefresh, modifier = Modifier.fillMaxSize()) {
-        BoxWithConstraints(Modifier.fillMaxSize()) {
-            val screenH = maxHeight
-            val screenW = maxWidth
-            Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
-                Row(Modifier.fillMaxWidth().background(style.paper).statusBarsPadding().padding(horizontal = 20.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Row(
-                        Modifier.weight(1f).clip(RoundedCornerShape(8.dp)).clickable(onClick = onSearch).padding(vertical = 10.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        UiGlyph(Glyph.Pin, style.accent, 20.dp)
-                        Spacer(Modifier.width(8.dp))
-                        Text(state.place.name, fontSize = 20.sp, fontWeight = FontWeight.Medium, color = style.ink, maxLines = 1)
+    Column(Modifier.fillMaxSize()) {
+        // Cabecera fija: no se mete bajo la barra de estado al scrollear.
+        Row(Modifier.fillMaxWidth().background(style.paper).statusBarsPadding().padding(horizontal = 20.dp), verticalAlignment = Alignment.CenterVertically) {
+            Row(
+                Modifier.weight(1f).clip(RoundedCornerShape(8.dp)).clickable(onClick = onSearch).padding(vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                UiGlyph(Glyph.Pin, style.accent, 20.dp)
+                Spacer(Modifier.width(8.dp))
+                Text(state.place.name, fontSize = 20.sp, fontWeight = FontWeight.Medium, color = style.ink, maxLines = 1)
+            }
+            IconTap(Glyph.Gear, onSettings)
+        }
+        PullToRefreshBox(isRefreshing = state.refreshing, onRefresh = onRefresh, modifier = Modifier.weight(1f).fillMaxWidth()) {
+            BoxWithConstraints(Modifier.fillMaxSize()) {
+                val screenH = maxHeight
+                val screenW = maxWidth
+                Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
+                    if (f == null) {
+                        Text(
+                            state.error ?: "Cargando…", color = style.inkSoft, fontStyle = FontStyle.Italic,
+                            modifier = Modifier.fillMaxWidth().padding(top = 120.dp), textAlign = TextAlign.Center, fontSize = 16.sp,
+                        )
+                        return@Column
                     }
-                    IconTap(Glyph.Gear, onSettings)
-                }
-                if (f == null) {
-                    Text(
-                        state.error ?: "Cargando…", color = style.inkSoft, fontStyle = FontStyle.Italic,
-                        modifier = Modifier.fillMaxWidth().padding(top = 120.dp), textAlign = TextAlign.Center, fontSize = 16.sp,
-                    )
-                    return@Column
-                }
-                val nowHour = f.current.time.hour + f.current.time.minute / 60f
-                val scope = rememberCoroutineScope()
-                val hourAnim = remember { Animatable(nowHour) }
-                var scrubbing by rememberSaveable { mutableStateOf(false) }
-                var hinted by rememberSaveable { mutableStateOf(false) }
-                val hour = if (scrubbing) hourAnim.value else nowHour
+                    val nowHour = f.current.time.hour + f.current.time.minute / 60f
+                    val currentIdx = openness(nowHour).let { w -> w.indices.maxBy { w[it] } }
+                    val scope = rememberCoroutineScope()
+                    val hourAnim = remember { Animatable(nowHour) }
+                    // null = mostrando el momento actual; si no, índice de la franja elegida.
+                    var selected by rememberSaveable { mutableStateOf<Int?>(null) }
+                    var hinted by rememberSaveable { mutableStateOf(false) }
+                    val scrubbing = selected != null
+                    val hour = if (scrubbing) hourAnim.value else nowHour
 
-                val haptic = LocalHapticFeedback.current
-                LaunchedEffect(hour.toInt(), scrubbing) { if (scrubbing) haptic.performHapticFeedback(HapticFeedbackType.SegmentFrequentTick) }
-
-                val pxPerHour = with(LocalDensity.current) { (screenH * 0.5f).toPx() } / 18f
-                val w = openness(hour)
-                val dominant = w.indices.maxBy { w[it] }
-                val expandedH = screenH * 0.30f
-                val collapsedH = 46.dp
-                val numberW = screenW - 40.dp - 128.dp - 8.dp
-
-                // Un solo módulo "abierto" que sube o baja al deslizar dentro de esta zona; fuera de ella scrollea toda la pantalla.
-                Column(
-                    Modifier.fillMaxWidth().pointerInput(nowHour, pxPerHour) {
-                        detectVerticalDragGestures { change, dy ->
-                            change.consume()
-                            hinted = true
-                            scope.launch {
-                                if (!scrubbing) { hourAnim.snapTo(nowHour); scrubbing = true }
-                                hourAnim.snapTo((hourAnim.value + dy / pxPerHour).coerceIn(0f, 23.99f))
-                            }
+                    fun hourOf(idx: Int) = if (idx == currentIdx) nowHour else Period.entries[idx].repHour
+                    fun select(idx: Int) {
+                        val from = selected
+                        selected = if (idx == currentIdx) null else idx
+                        scope.launch {
+                            if (from == null) hourAnim.snapTo(nowHour)
+                            hourAnim.animateTo(hourOf(idx), tween(380))
                         }
-                    },
-                ) {
-                    Period.entries.forEachIndexed { idx, p ->
-                        val live = idx == dominant
-                        val m = if (live && !scrubbing) Moment(f.current.temperature, f.current.condition, f.current.isDay, null)
-                        else momentAt(f, if (live) hour else p.repHour)
-                        Module(
-                            p, m, f, w[idx], live, scrubbing && live, hinted, hour, clock, collapsedH, expandedH, numberW,
-                            onJump = {
-                                scope.launch {
-                                    if (!scrubbing) { hourAnim.snapTo(nowHour); scrubbing = true }
-                                    hourAnim.animateTo(p.repHour, tween(450))
+                    }
+
+                    val haptic = LocalHapticFeedback.current
+                    LaunchedEffect(selected) { if (selected != null) haptic.performHapticFeedback(HapticFeedbackType.SegmentFrequentTick) }
+
+                    val thresholdPx = with(LocalDensity.current) { 44.dp.toPx() }
+                    val w = openness(hour)
+                    val dominant = w.indices.maxBy { w[it] }
+                    val expandedH = screenH * 0.32f
+                    val collapsedH = 46.dp
+                    val numberW = screenW - 40.dp - 128.dp - 8.dp
+
+                    // Deslizar sobre las franjas "corre" el módulo abierto: un gesto mueve solo hasta la franja contigua, con snap.
+                    Column(
+                        Modifier.fillMaxWidth().pointerInput(currentIdx, nowHour) {
+                            var acc = 0f
+                            var fired = false
+                            detectVerticalDragGestures(
+                                onDragStart = { acc = 0f; fired = false },
+                                onDragEnd = { if (!fired) select(selected ?: currentIdx) },
+                                onDragCancel = { if (!fired) select(selected ?: currentIdx) },
+                            ) { change, dy ->
+                                change.consume()
+                                hinted = true
+                                if (fired) return@detectVerticalDragGestures
+                                acc += dy
+                                val base = selected ?: currentIdx
+                                // Dedo hacia abajo = franja anterior, hacia arriba = la siguiente.
+                                val dir = if (acc > 0) -1 else 1
+                                val target = base + dir
+                                if (kotlin.math.abs(acc) >= thresholdPx && target in 0..3) {
+                                    fired = true
+                                    select(target)
+                                } else if (target in 0..3) {
+                                    val k = (kotlin.math.abs(acc) / thresholdPx).coerceIn(0f, 1f) * STEP
+                                    val h0 = hourOf(base)
+                                    scope.launch {
+                                        if (selected == null) { selected = base; hourAnim.snapTo(h0) }
+                                        hourAnim.snapTo(h0 + (hourOf(target) - h0) * k)
+                                    }
                                 }
-                            },
-                            onReset = { scope.launch { hourAnim.animateTo(nowHour, tween(450)); scrubbing = false } },
+                            }
+                        },
+                    ) {
+                        Period.entries.forEachIndexed { idx, p ->
+                            val live = idx == dominant
+                            val m = if (live && !scrubbing) Moment(f.current.temperature, f.current.condition, f.current.isDay, null)
+                            else momentAt(f, if (live) hour else p.repHour)
+                            Module(
+                                p, m, f, w[idx], live, scrubbing && live, hinted, hour, clock, collapsedH, expandedH, numberW,
+                                onJump = { select(idx) },
+                                onReset = { select(currentIdx) },
+                            )
+                        }
+                    }
+                    Column(Modifier.padding(horizontal = 16.dp, vertical = 16.dp).navigationBarsPadding(), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                        HourlyCard(f, style)
+                        DailyCard(f, style)
+                        DetailsGrid(f, style)
+                        Text(
+                            "BonaClima v$version · Datos: Open-Meteo · actualizado ${updatedAgo(f)}",
+                            color = style.inkSoft, fontSize = 11.sp, fontStyle = FontStyle.Italic,
+                            modifier = Modifier.fillMaxWidth(), textAlign = TextAlign.Center,
                         )
                     }
-                }
-                Column(Modifier.padding(horizontal = 16.dp, vertical = 16.dp).navigationBarsPadding(), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                    HourlyCard(f, style)
-                    DailyCard(f, style)
-                    DetailsGrid(f, style)
-                    Text(
-                        "BonaClima v$version · Datos: Open-Meteo · actualizado ${updatedAgo(f)}",
-                        color = style.inkSoft, fontSize = 11.sp, fontStyle = FontStyle.Italic,
-                        modifier = Modifier.fillMaxWidth(), textAlign = TextAlign.Center,
-                    )
                 }
             }
         }
@@ -233,47 +265,53 @@ private fun Module(
     val ink = inkOn(p.color)
     val soft = ink.copy(alpha = 0.78f)
     val today = f.daily.firstOrNull()
+    // Los dos contenidos no se superponen: el plegado se apaga en la primera mitad y el abierto aparece en la segunda.
+    val foldedA = (1f - open * 2f).coerceIn(0f, 1f)
+    val openA = (open * 2f - 1f).coerceIn(0f, 1f)
     Box(Modifier.fillMaxWidth().height(collapsedH + (expandedH - collapsedH) * open).clip(RoundedCornerShape(0.dp)).background(p.color).clickable(enabled = open < 0.5f, onClick = onJump)) {
-        // Plegado: nombre + temperatura chica.
-        Row(
-            Modifier.fillMaxWidth().height(collapsedH).padding(horizontal = 20.dp).alpha(1f - open),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text(p.label.uppercase(AR), fontSize = 11.sp, letterSpacing = 1.8.sp, fontWeight = FontWeight.Bold, color = ink.copy(alpha = 0.85f), maxLines = 1, modifier = Modifier.weight(1f))
-            WeatherGlyph(m.condition, m.isDay, ink, 22.dp)
-            Spacer(Modifier.width(12.dp))
-            Text("${m.temp.roundToInt()}°", fontSize = 17.sp, fontWeight = FontWeight.Medium, color = ink, modifier = Modifier.width(36.dp), textAlign = TextAlign.End)
-        }
-        // Abierto.
-        if (open > 0.02f) {
-            val numberSp = (numberW.value / 1.75f).coerceIn(56f, (expandedH.value * 0.45f).coerceAtLeast(56f))
+        if (foldedA > 0f) {
             Row(
-                Modifier.fillMaxWidth().height(expandedH).padding(start = 20.dp, end = 20.dp, top = 6.dp).alpha(open),
+                Modifier.fillMaxWidth().height(collapsedH).padding(horizontal = 20.dp).alpha(foldedA),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Column(Modifier.width(numberW)) {
-                    Text(
-                        if (scrubbing) "${p.label} · ${hourLabel(hour)}  ·  VOLVER A AHORA" else if (live) "${p.label} · AHORA" else p.label,
-                        fontSize = 11.sp, letterSpacing = 1.4.sp, fontWeight = FontWeight.Bold, color = soft, maxLines = 1, softWrap = false,
-                        modifier = Modifier.then(if (scrubbing) Modifier.clickable(onClick = onReset) else Modifier),
-                    )
-                    Text("${m.temp.roundToInt()}°", fontSize = numberSp.sp, lineHeight = (numberSp * 1.05f).sp, fontWeight = FontWeight.Light, color = ink, maxLines = 1, softWrap = false)
-                    Text(m.condition.label, fontSize = 18.sp, color = ink, maxLines = 1)
-                    Text(
-                        when {
-                            m.precip != null && m.precip >= 10 -> "Lluvia ${m.precip}%"
-                            today != null -> "Máx ${today.tempMax.roundToInt()}° · Mín ${today.tempMin.roundToInt()}°"
-                            else -> " "
-                        },
-                        fontSize = 12.sp, color = soft, maxLines = 1,
-                    )
-                    if (live && !scrubbing && !hinted) {
-                        Text("↕ Deslizá sobre las franjas", fontSize = 11.sp, fontStyle = FontStyle.Italic, color = soft, maxLines = 1)
+                Text(p.label.uppercase(AR), fontSize = 11.sp, letterSpacing = 1.8.sp, fontWeight = FontWeight.Bold, color = ink.copy(alpha = 0.85f), maxLines = 1, modifier = Modifier.weight(1f))
+                WeatherGlyph(m.condition, m.isDay, ink, 22.dp)
+                Spacer(Modifier.width(12.dp))
+                Text("${m.temp.roundToInt()}°", fontSize = 17.sp, fontWeight = FontWeight.Medium, color = ink, modifier = Modifier.width(36.dp), textAlign = TextAlign.End)
+            }
+        }
+        if (openA > 0f) {
+            val numberSp = (numberW.value / 1.75f).coerceIn(56f, ((expandedH.value - 40f) * 0.7f).coerceAtLeast(56f))
+            Column(Modifier.fillMaxWidth().height(expandedH).padding(start = 20.dp, end = 20.dp, top = 14.dp, bottom = 8.dp).alpha(openA)) {
+                Text(
+                    when {
+                        scrubbing -> "${p.label} · ${hourLabel(hour)} · ↺ AHORA"
+                        live -> "${p.label} · AHORA"
+                        else -> p.label
+                    }.uppercase(AR),
+                    fontSize = 11.sp, letterSpacing = 1.4.sp, fontWeight = FontWeight.Bold, color = soft, maxLines = 1, softWrap = false,
+                    modifier = Modifier.then(if (scrubbing) Modifier.clickable(onClick = onReset) else Modifier),
+                )
+                Row(Modifier.weight(1f).fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.width(numberW)) {
+                        Text("${m.temp.roundToInt()}°", fontSize = numberSp.sp, lineHeight = (numberSp * 1.05f).sp, fontWeight = FontWeight.Light, color = ink, maxLines = 1, softWrap = false)
+                        Text(m.condition.label, fontSize = 18.sp, color = ink, maxLines = 1)
+                        Text(
+                            when {
+                                m.precip != null && m.precip >= 10 -> "Lluvia ${m.precip}%"
+                                today != null -> "Máx ${today.tempMax.roundToInt()}° · Mín ${today.tempMin.roundToInt()}°"
+                                else -> " "
+                            },
+                            fontSize = 12.sp, color = soft, maxLines = 1,
+                        )
+                    }
+                    Spacer(Modifier.width(8.dp))
+                    Crossfade(m.condition to m.isDay, animationSpec = tween(350), label = "scene", modifier = Modifier.size(128.dp)) { (c, day) ->
+                        FlatScene(c, day, { clock.value }, Modifier.fillMaxSize())
                     }
                 }
-                Spacer(Modifier.width(8.dp))
-                Crossfade(m.condition to m.isDay, animationSpec = tween(350), label = "scene", modifier = Modifier.size(128.dp)) { (c, day) ->
-                    FlatScene(c, day, { clock.value }, Modifier.fillMaxSize())
+                if (live && !scrubbing && !hinted) {
+                    Text("↕ Deslizá sobre las franjas", fontSize = 11.sp, fontStyle = FontStyle.Italic, color = soft, maxLines = 1)
                 }
             }
         }
