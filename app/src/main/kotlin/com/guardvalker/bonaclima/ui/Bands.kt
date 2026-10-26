@@ -136,6 +136,7 @@ private fun hourLabel(hour: Float): String {
 }
 
 private val STEP = 0.35f
+private val SCENE = 100.dp
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -175,7 +176,6 @@ fun BandsMain(state: UiState, version: String, style: BonaStyle, onSearch: () ->
                     val hourAnim = remember { Animatable(nowHour) }
                     // null = mostrando el momento actual; si no, índice de la franja elegida.
                     var selected by rememberSaveable { mutableStateOf<Int?>(null) }
-                    var hinted by rememberSaveable { mutableStateOf(false) }
                     val scrubbing = selected != null
                     val hour = if (scrubbing) hourAnim.value else nowHour
 
@@ -195,9 +195,9 @@ fun BandsMain(state: UiState, version: String, style: BonaStyle, onSearch: () ->
                     val thresholdPx = with(LocalDensity.current) { 44.dp.toPx() }
                     val w = openness(hour)
                     val dominant = w.indices.maxBy { w[it] }
-                    val expandedH = screenH * 0.32f
-                    val collapsedH = 46.dp
-                    val numberW = screenW - 40.dp - 128.dp - 8.dp
+                    val expandedH = screenH * 0.40f
+                    val collapsedH = 34.dp
+                    val numberW = screenW - 40.dp - SCENE - 8.dp
 
                     // Deslizar sobre las franjas "corre" el módulo abierto: un gesto mueve solo hasta la franja contigua, con snap.
                     Column(
@@ -218,7 +218,6 @@ fun BandsMain(state: UiState, version: String, style: BonaStyle, onSearch: () ->
                                         total += dy
                                         if (kotlin.math.abs(total) <= slop) continue
                                         dragging = true
-                                        hinted = true
                                         acc = total
                                     } else acc += dy
                                     // Se consume en la pasada inicial: la pantalla no scrollea mientras se arrastra sobre las franjas.
@@ -249,7 +248,7 @@ fun BandsMain(state: UiState, version: String, style: BonaStyle, onSearch: () ->
                             val m = if (live && !scrubbing) Moment(f.current.temperature, f.current.condition, f.current.isDay, null)
                             else momentAt(f, if (live) hour else p.repHour)
                             Module(
-                                p, m, f, w[idx], live, scrubbing && live, hinted, hour, clock, collapsedH, expandedH, numberW,
+                                p, m, f, w[idx], live, scrubbing && live, hour, clock, collapsedH, expandedH, numberW,
                                 onJump = { select(idx) },
                                 onReset = { select(currentIdx) },
                             )
@@ -274,7 +273,7 @@ fun BandsMain(state: UiState, version: String, style: BonaStyle, onSearch: () ->
 /** Módulo de un momento del día: plegado es una franja fina; abierto (open 0..1) muestra número, clima y escena animada. */
 @Composable
 private fun Module(
-    p: Period, m: Moment, f: Forecast, open: Float, live: Boolean, scrubbing: Boolean, hinted: Boolean, hour: Float,
+    p: Period, m: Moment, f: Forecast, open: Float, live: Boolean, scrubbing: Boolean, hour: Float,
     clock: State<Float>, collapsedH: Dp, expandedH: Dp, numberW: Dp, onJump: () -> Unit, onReset: () -> Unit,
 ) {
     val ink = inkOn(p.color)
@@ -289,14 +288,14 @@ private fun Module(
                 Modifier.fillMaxWidth().height(collapsedH).padding(horizontal = 20.dp).alpha(foldedA),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text(p.label.uppercase(AR), fontSize = 11.sp, letterSpacing = 1.8.sp, fontWeight = FontWeight.Bold, color = ink.copy(alpha = 0.85f), maxLines = 1, modifier = Modifier.weight(1f))
-                WeatherGlyph(m.condition, m.isDay, ink, 22.dp)
+                Text(p.label.uppercase(AR), fontSize = 10.sp, letterSpacing = 1.6.sp, fontWeight = FontWeight.Bold, color = ink.copy(alpha = 0.85f), maxLines = 1, modifier = Modifier.weight(1f))
+                WeatherGlyph(m.condition, m.isDay, ink, 18.dp)
                 Spacer(Modifier.width(12.dp))
-                Text("${m.temp.roundToInt()}°", fontSize = 17.sp, fontWeight = FontWeight.Medium, color = ink, modifier = Modifier.width(36.dp), textAlign = TextAlign.End)
+                Text("${m.temp.roundToInt()}°", fontSize = 15.sp, fontWeight = FontWeight.Medium, color = ink, modifier = Modifier.width(36.dp), textAlign = TextAlign.End)
             }
         }
         if (openA > 0f) {
-            val numberSp = (numberW.value / 1.75f).coerceIn(56f, ((expandedH.value - 40f) * 0.7f).coerceAtLeast(56f))
+            val numberSp = (numberW.value / 1.62f).coerceIn(56f, ((expandedH.value - 40f) * 0.75f).coerceAtLeast(56f))
             Column(Modifier.fillMaxWidth().height(expandedH).padding(start = 20.dp, end = 20.dp, top = 14.dp, bottom = 8.dp).alpha(openA)) {
                 Text(
                     when {
@@ -321,12 +320,9 @@ private fun Module(
                         )
                     }
                     Spacer(Modifier.width(8.dp))
-                    Crossfade(m.condition to m.isDay, animationSpec = tween(350), label = "scene", modifier = Modifier.size(128.dp)) { (c, day) ->
+                    Crossfade(m.condition to m.isDay, animationSpec = tween(350), label = "scene", modifier = Modifier.size(SCENE)) { (c, day) ->
                         FlatScene(c, day, { clock.value }, Modifier.fillMaxSize())
                     }
-                }
-                if (live && !scrubbing && !hinted) {
-                    Text("↕ Deslizá sobre las franjas", fontSize = 11.sp, fontStyle = FontStyle.Italic, color = soft, maxLines = 1)
                 }
             }
         }
