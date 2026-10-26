@@ -5,6 +5,14 @@ class ChangelogEntry(val version: String, val date: String, val items: List<Stri
 /** Historial de cambios que muestra la app. Agregar una entrada arriba en cada release. */
 val CHANGELOG = listOf(
     ChangelogEntry(
+        "0.4.0", "2026-10-26",
+        listOf(
+            "Nuevo estilo \"Google\" (ahora el predeterminado): diseño tipo Google Weather con colores Material You del sistema, claro/oscuro automático y tarjetas redondeadas.",
+            "Resumen en una frase, gráfico de temperatura por hora, pronóstico de 10 días y tarjetas de precipitación, viento con ráfagas, UV, humedad con punto de rocío, calidad del aire, visibilidad, presión y arco del sol.",
+            "Los estilos de papel y Franjas siguen disponibles en Ajustes.",
+        ),
+    ),
+    ChangelogEntry(
         "0.3.10", "2026-10-26",
         listOf(
             "Franjas: las próximas horas se tiñen con el color de su momento del día (mañana, tarde, tardecita, noche) y muestran el nombre donde empieza cada uno.",

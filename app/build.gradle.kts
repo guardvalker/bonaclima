@@ -20,8 +20,8 @@ android {
         applicationId = "com.guardvalker.bonaclima"
         minSdk = 26
         targetSdk = 36
-        versionCode = 14
-        versionName = "0.3.10"
+        versionCode = 15
+        versionName = "0.4.0"
     }
 
     signingConfigs {

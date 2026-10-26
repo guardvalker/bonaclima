@@ -85,7 +85,10 @@ private const val CHANGELOG_SCREEN = "changelog"
 @Composable
 fun WeatherApp(vm: WeatherViewModel) {
     val state by vm.state.collectAsStateWithLifecycle()
-    val style = styleById(state.styleId)
+    val baseStyle = styleById(state.styleId)
+    val sysDark = androidx.compose.foundation.isSystemInDarkTheme()
+    val gScheme = if (baseStyle.google) googleScheme(sysDark) else null
+    val style = if (gScheme != null) googleStyle(baseStyle, gScheme, sysDark) else baseStyle
     var screen by rememberSaveable { mutableStateOf(MAIN) }
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { vm.refreshIfStale(); vm.checkForAppUpdate() }
     BackHandler(enabled = screen != MAIN) { screen = if (screen == CHANGELOG_SCREEN) SETTINGS else MAIN }
@@ -99,7 +102,7 @@ fun WeatherApp(vm: WeatherViewModel) {
         onDispose {}
     }
 
-    val scheme = if (style.dark) {
+    val scheme = gScheme ?: if (style.dark) {
         darkColorScheme(
             primary = style.accent, onPrimary = style.paper, background = style.paper, onBackground = style.ink,
             surface = style.card, onSurface = style.ink, surfaceContainerHigh = style.card,
@@ -115,10 +118,10 @@ fun WeatherApp(vm: WeatherViewModel) {
     MaterialTheme(colorScheme = scheme) {
         CompositionLocalProvider(
             LocalStyle provides style,
-            LocalTextStyle provides LocalTextStyle.current.merge(TextStyle(fontFamily = FontFamily.Serif, color = style.ink)),
+            LocalTextStyle provides LocalTextStyle.current.merge(TextStyle(fontFamily = if (style.google) FontFamily.SansSerif else FontFamily.Serif, color = style.ink)),
         ) {
             Box(Modifier.fillMaxSize()) {
-                PaperBackground(style)
+                if (style.google) Box(Modifier.fillMaxSize().background(style.paper)) else PaperBackground(style)
                 Crossfade(screen, animationSpec = tween(220), label = "screen") { current ->
                     when (current) {
                         SEARCH -> SearchPanel(
@@ -144,6 +147,10 @@ fun WeatherApp(vm: WeatherViewModel) {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun MainContent(state: UiState, version: String, style: BonaStyle, onSearch: () -> Unit, onSettings: () -> Unit, onRefresh: () -> Unit) {
+    if (style.google) {
+        GoogleMain(state, version, style, onSearch, onSettings, onRefresh)
+        return
+    }
     if (style.bands) {
         BandsMain(state, version, style, onSearch, onSettings, onRefresh)
         return
@@ -353,12 +360,12 @@ private fun SearchPanel(results: List<Place>, onQuery: (String) -> Unit, onPick:
     }
 }
 
-private fun compass(deg: Int): String {
+internal fun compass(deg: Int): String {
     val dirs = listOf("N", "NE", "E", "SE", "S", "SO", "O", "NO")
     return dirs[((deg + 22.5) / 45).toInt() % 8]
 }
 
-private fun uvLabel(uv: Double) = when {
+internal fun uvLabel(uv: Double) = when {
     uv < 3 -> "Bajo (${uv.roundToInt()})"
     uv < 6 -> "Moderado (${uv.roundToInt()})"
     uv < 8 -> "Alto (${uv.roundToInt()})"

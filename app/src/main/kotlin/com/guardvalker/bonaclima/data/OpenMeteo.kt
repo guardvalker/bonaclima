@@ -1,5 +1,6 @@
 package com.guardvalker.bonaclima.data
 
+import com.guardvalker.bonaclima.domain.AirQuality
 import com.guardvalker.bonaclima.domain.Condition
 import com.guardvalker.bonaclima.domain.CurrentWeather
 import com.guardvalker.bonaclima.domain.DailyPoint
@@ -37,13 +38,21 @@ class OpenMeteoProvider : WeatherProvider, GeocodingProvider {
         val url = "https://api.open-meteo.com/v1/forecast" +
             "?latitude=${place.latitude}&longitude=${place.longitude}" +
             "&current=temperature_2m,relative_humidity_2m,apparent_temperature,is_day,precipitation," +
-            "weather_code,wind_speed_10m,wind_direction_10m,pressure_msl,uv_index" +
-            "&hourly=temperature_2m,precipitation_probability,weather_code,is_day" +
+            "weather_code,wind_speed_10m,wind_direction_10m,wind_gusts_10m,pressure_msl,uv_index,cloud_cover" +
+            "&hourly=temperature_2m,precipitation_probability,precipitation,weather_code,is_day,dew_point_2m,visibility" +
             "&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max," +
-            "sunrise,sunset,uv_index_max" +
-            "&timezone=auto&forecast_days=8"
+            "sunrise,sunset,uv_index_max,precipitation_sum" +
+            "&timezone=auto&forecast_days=10"
         val dto = json.decodeFromString<ForecastDto>(httpGet(url))
-        return dto.toForecast(place, id)
+        val air = runCatching { airQuality(place) }.getOrNull()
+        return dto.toForecast(place, id).copy(airQuality = air)
+    }
+
+    private suspend fun airQuality(place: Place): AirQuality? {
+        val url = "https://air-quality-api.open-meteo.com/v1/air-quality" +
+            "?latitude=${place.latitude}&longitude=${place.longitude}&current=us_aqi,pm2_5,pm10&timezone=auto"
+        val cur = json.decodeFromString<AirDto>(httpGet(url)).current ?: return null
+        return AirQuality(cur.usAqi ?: return null, cur.pm25, cur.pm10)
     }
 
     override suspend fun search(query: String): List<Place> {
@@ -108,6 +117,10 @@ private data class ForecastDto(
             pressureHpa = current.pressure,
             uvIndex = current.uv,
             precipitationMm = current.precipitation,
+            windGustKmh = current.windGusts,
+            cloudCover = current.cloudCover,
+            dewPoint = hourly.dewPoint.getOrNull(hourly.time.indexOf(current.time.take(14) + "00").takeIf { it >= 0 } ?: 0),
+            visibilityKm = hourly.visibility.getOrNull(hourly.time.indexOf(current.time.take(14) + "00").takeIf { it >= 0 } ?: 0)?.let { it / 1000.0 },
         )
         val hours = hourly.time.indices.mapNotNull { i ->
             val t = hourly.temperature.getOrNull(i) ?: return@mapNotNull null
@@ -117,6 +130,7 @@ private data class ForecastDto(
                 condition = wmoToCondition(hourly.code.getOrNull(i)),
                 isDay = hourly.isDay.getOrNull(i) != 0,
                 precipProbability = hourly.precipProbability.getOrNull(i),
+                precipMm = hourly.precipitation.getOrNull(i),
             )
         }
         val days = daily.time.indices.mapNotNull { i ->
@@ -131,6 +145,7 @@ private data class ForecastDto(
                 sunset = daily.sunset.getOrNull(i)?.let(LocalDateTime::parse),
                 precipProbability = daily.precipProbability.getOrNull(i),
                 uvMax = daily.uvMax.getOrNull(i),
+                precipSumMm = daily.precipSum.getOrNull(i),
             )
         }
         return Forecast(place, providerId, System.currentTimeMillis(), cur, hours, days)
@@ -149,6 +164,8 @@ private data class CurrentDto(
     @SerialName("wind_speed_10m") val windSpeed: Double? = null,
     @SerialName("wind_direction_10m") val windDirection: Int? = null,
     @SerialName("pressure_msl") val pressure: Double? = null,
+    @SerialName("wind_gusts_10m") val windGusts: Double? = null,
+    @SerialName("cloud_cover") val cloudCover: Int? = null,
     @SerialName("uv_index") val uv: Double? = null,
 )
 
@@ -159,6 +176,9 @@ private data class HourlyDto(
     @SerialName("precipitation_probability") val precipProbability: List<Int?> = emptyList(),
     @SerialName("weather_code") val code: List<Int?> = emptyList(),
     @SerialName("is_day") val isDay: List<Int?> = emptyList(),
+    val precipitation: List<Double?> = emptyList(),
+    @SerialName("dew_point_2m") val dewPoint: List<Double?> = emptyList(),
+    val visibility: List<Double?> = emptyList(),
 )
 
 @Serializable
@@ -171,4 +191,15 @@ private data class DailyDto(
     val sunrise: List<String?> = emptyList(),
     val sunset: List<String?> = emptyList(),
     @SerialName("uv_index_max") val uvMax: List<Double?> = emptyList(),
+    @SerialName("precipitation_sum") val precipSum: List<Double?> = emptyList(),
+)
+
+@Serializable
+private data class AirDto(val current: AirCurrentDto? = null)
+
+@Serializable
+private data class AirCurrentDto(
+    @SerialName("us_aqi") val usAqi: Int? = null,
+    @SerialName("pm2_5") val pm25: Double? = null,
+    val pm10: Double? = null,
 )

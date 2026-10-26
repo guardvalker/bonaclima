@@ -32,9 +32,19 @@ data class BonaStyle(
     val cloud: Color,
     /** Diseño "Franjas": número grande, franjas por momento del día y deslizar para recorrer las horas. */
     val bands: Boolean = false,
+    /** Diseño tipo Google Weather: Material You, tarjetas redondeadas, tipografía sans. Colores de UI salen del tema del sistema. */
+    val google: Boolean = false,
 )
 
 val STYLES = listOf(
+    BonaStyle(
+        id = "google", name = "Google", tagline = "Estilo Google Weather con colores del sistema", dark = false,
+        paper = Color(0xFFF8F9FC), card = Color(0xFFEEF1F7), ink = Color(0xFF1B1C1F), inkSoft = Color(0xFF5B5F68),
+        accent = Color(0xFF3B6FD4), line = Color(0xFFD5D9E2), water = Color(0xFF2F7FD1), ruled = false,
+        dayTop = Color(0xFF4C8FDB), dayBottom = Color(0xFFBFDDF6), nightTop = Color(0xFF0E1A33), nightBottom = Color(0xFF2A3F66),
+        twiTop = Color(0xFF47488A), twiBottom = Color(0xFFF2A65A), overcast = Color(0xFF8C9BAA), cloud = Color(0xFFFFFFFF),
+        google = true,
+    ),
     BonaStyle(
         id = "pergamino", name = "Pergamino", tagline = "Hoja crema, tinta marrón", dark = false,
         paper = Color(0xFFF0E2C2), card = Color(0xFFF7EDD6), ink = Color(0xFF3B2716), inkSoft = Color(0xFF7A6350),

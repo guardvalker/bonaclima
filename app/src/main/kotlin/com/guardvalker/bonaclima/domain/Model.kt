@@ -48,6 +48,10 @@ data class CurrentWeather(
     val pressureHpa: Double? = null,
     val uvIndex: Double? = null,
     val precipitationMm: Double? = null,
+    val dewPoint: Double? = null,
+    val visibilityKm: Double? = null,
+    val windGustKmh: Double? = null,
+    val cloudCover: Int? = null,
 )
 
 @Serializable
@@ -57,6 +61,7 @@ data class HourlyPoint(
     val condition: Condition,
     val isDay: Boolean,
     val precipProbability: Int? = null,
+    val precipMm: Double? = null,
 )
 
 @Serializable
@@ -69,7 +74,12 @@ data class DailyPoint(
     @Serializable(LocalDateTimeSerializer::class) val sunset: LocalDateTime? = null,
     val precipProbability: Int? = null,
     val uvMax: Double? = null,
+    val precipSumMm: Double? = null,
 )
+
+/** Calidad del aire (escala US AQI) con partículas, de una fuente aparte del pronóstico. */
+@Serializable
+data class AirQuality(val usAqi: Int, val pm25: Double? = null, val pm10: Double? = null)
 
 @Serializable
 data class Forecast(
@@ -79,6 +89,7 @@ data class Forecast(
     val current: CurrentWeather,
     val hourly: List<HourlyPoint>,
     val daily: List<DailyPoint>,
+    val airQuality: AirQuality? = null,
 )
 
 object LocalDateTimeSerializer : KSerializer<LocalDateTime> {
