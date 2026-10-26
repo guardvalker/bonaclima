@@ -136,7 +136,7 @@ private fun hourLabel(hour: Float): String {
 }
 
 private val STEP = 0.35f
-private val SCENE = 100.dp
+private val SCENE = 92.dp
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -195,13 +195,11 @@ fun BandsMain(state: UiState, version: String, style: BonaStyle, onSearch: () ->
                     val thresholdPx = with(LocalDensity.current) { 44.dp.toPx() }
                     val w = openness(hour)
                     val dominant = w.indices.maxBy { w[it] }
-                    val expandedH = screenH * 0.40f
-                    val collapsedH = 34.dp
-                    val numberW = screenW - 40.dp - SCENE - 8.dp
+                    val panelH = screenH * 0.46f
 
                     // Deslizar sobre las franjas "corre" el módulo abierto: un gesto mueve solo hasta la franja contigua, con snap.
-                    Column(
-                        Modifier.fillMaxWidth().pointerInput(currentIdx, nowHour) {
+                    Row(
+                        Modifier.fillMaxWidth().height(panelH).pointerInput(currentIdx, nowHour) {
                             awaitEachGesture {
                                 val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
                                 val slop = viewConfiguration.touchSlop
@@ -243,16 +241,12 @@ fun BandsMain(state: UiState, version: String, style: BonaStyle, onSearch: () ->
                             }
                         },
                     ) {
-                        Period.entries.forEachIndexed { idx, p ->
-                            val live = idx == dominant
-                            val m = if (live && !scrubbing) Moment(f.current.temperature, f.current.condition, f.current.isDay, null)
-                            else momentAt(f, if (live) hour else p.repHour)
-                            Module(
-                                p, m, f, w[idx], live, scrubbing && live, hour, clock, collapsedH, expandedH, numberW,
-                                onJump = { select(idx) },
-                                onReset = { select(currentIdx) },
-                            )
-                        }
+                        val m = if (!scrubbing) Moment(f.current.temperature, f.current.condition, f.current.isDay, null) else momentAt(f, hour)
+                        Panel(
+                            Period.entries[dominant], m, f, blendColor(w), scrubbing, hour, clock, Modifier.weight(1f).fillMaxSize(),
+                            onReset = { select(currentIdx) },
+                        )
+                        Selector(f, dominant, Modifier.width(52.dp).fillMaxSize()) { select(it) }
                     }
                     Column(Modifier.padding(horizontal = 16.dp, vertical = 16.dp).navigationBarsPadding(), verticalArrangement = Arrangement.spacedBy(16.dp)) {
                         HourlyCard(f, style)
@@ -270,60 +264,60 @@ fun BandsMain(state: UiState, version: String, style: BonaStyle, onSearch: () ->
     }
 }
 
-/** Módulo de un momento del día: plegado es una franja fina; abierto (open 0..1) muestra número, clima y escena animada. */
+/** Mezcla los colores de las franjas según cuánto pesa cada una a esta hora: el cambio de color es continuo. */
+private fun blendColor(w: FloatArray): Color {
+    var r = 0f; var g = 0f; var b = 0f
+    Period.entries.forEachIndexed { i, p -> r += p.color.red * w[i]; g += p.color.green * w[i]; b += p.color.blue * w[i] }
+    return Color(r.coerceIn(0f, 1f), g.coerceIn(0f, 1f), b.coerceIn(0f, 1f))
+}
+
+/** Panel único: número y escena siempre en el mismo lugar; solo cambian el color, los valores y el nombre del momento. */
 @Composable
-private fun Module(
-    p: Period, m: Moment, f: Forecast, open: Float, live: Boolean, scrubbing: Boolean, hour: Float,
-    clock: State<Float>, collapsedH: Dp, expandedH: Dp, numberW: Dp, onJump: () -> Unit, onReset: () -> Unit,
+private fun Panel(
+    p: Period, m: Moment, f: Forecast, color: Color, scrubbing: Boolean, hour: Float, clock: State<Float>,
+    modifier: Modifier, onReset: () -> Unit,
 ) {
-    val ink = inkOn(p.color)
+    val ink = inkOn(color)
     val soft = ink.copy(alpha = 0.78f)
     val today = f.daily.firstOrNull()
-    // Los dos contenidos no se superponen: el plegado se apaga en la primera mitad y el abierto aparece en la segunda.
-    val foldedA = (1f - open * 2f).coerceIn(0f, 1f)
-    val openA = (open * 2f - 1f).coerceIn(0f, 1f)
-    Box(Modifier.fillMaxWidth().height(collapsedH + (expandedH - collapsedH) * open).clip(RoundedCornerShape(0.dp)).background(p.color).clickable(enabled = open < 0.5f, onClick = onJump)) {
-        if (foldedA > 0f) {
-            Row(
-                Modifier.fillMaxWidth().height(collapsedH).padding(horizontal = 20.dp).alpha(foldedA),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(p.label.uppercase(AR), fontSize = 10.sp, letterSpacing = 1.6.sp, fontWeight = FontWeight.Bold, color = ink.copy(alpha = 0.85f), maxLines = 1, modifier = Modifier.weight(1f))
-                WeatherGlyph(m.condition, m.isDay, ink, 18.dp)
-                Spacer(Modifier.width(12.dp))
-                Text("${m.temp.roundToInt()}°", fontSize = 15.sp, fontWeight = FontWeight.Medium, color = ink, modifier = Modifier.width(36.dp), textAlign = TextAlign.End)
-            }
+    BoxWithConstraints(modifier.background(color)) {
+        val numberSp = (maxWidth.value / 1.6f).coerceAtMost(maxHeight.value * 0.5f).coerceAtLeast(64f)
+        Text(
+            (if (scrubbing) "${p.label} · ${hourLabel(hour)} · ↺ AHORA" else "${p.label} · AHORA").uppercase(AR),
+            fontSize = 11.sp, letterSpacing = 1.4.sp, fontWeight = FontWeight.Bold, color = soft, maxLines = 1, softWrap = false,
+            modifier = Modifier.padding(start = 20.dp, top = 16.dp).then(if (scrubbing) Modifier.clickable(onClick = onReset) else Modifier),
+        )
+        Crossfade(m.condition to m.isDay, animationSpec = tween(350), label = "scene", modifier = Modifier.align(Alignment.TopEnd).padding(top = 14.dp, end = 12.dp).size(SCENE)) { (c, day) ->
+            FlatScene(c, day, { clock.value }, Modifier.fillMaxSize())
         }
-        if (openA > 0f) {
-            val numberSp = (numberW.value / 1.62f).coerceIn(56f, ((expandedH.value - 40f) * 0.75f).coerceAtLeast(56f))
-            Column(Modifier.fillMaxWidth().height(expandedH).padding(start = 20.dp, end = 20.dp, top = 14.dp, bottom = 8.dp).alpha(openA)) {
-                Text(
-                    when {
-                        scrubbing -> "${p.label} · ${hourLabel(hour)} · ↺ AHORA"
-                        live -> "${p.label} · AHORA"
-                        else -> p.label
-                    }.uppercase(AR),
-                    fontSize = 11.sp, letterSpacing = 1.4.sp, fontWeight = FontWeight.Bold, color = soft, maxLines = 1, softWrap = false,
-                    modifier = Modifier.then(if (scrubbing) Modifier.clickable(onClick = onReset) else Modifier),
-                )
-                Row(Modifier.weight(1f).fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.width(numberW)) {
-                        Text("${m.temp.roundToInt()}°", fontSize = numberSp.sp, lineHeight = (numberSp * 1.05f).sp, fontWeight = FontWeight.Light, color = ink, maxLines = 1, softWrap = false)
-                        Text(m.condition.label, fontSize = 18.sp, color = ink, maxLines = 1)
-                        Text(
-                            when {
-                                m.precip != null && m.precip >= 10 -> "Lluvia ${m.precip}%"
-                                today != null -> "Máx ${today.tempMax.roundToInt()}° · Mín ${today.tempMin.roundToInt()}°"
-                                else -> " "
-                            },
-                            fontSize = 12.sp, color = soft, maxLines = 1,
-                        )
-                    }
-                    Spacer(Modifier.width(8.dp))
-                    Crossfade(m.condition to m.isDay, animationSpec = tween(350), label = "scene", modifier = Modifier.size(SCENE)) { (c, day) ->
-                        FlatScene(c, day, { clock.value }, Modifier.fillMaxSize())
-                    }
-                }
+        Column(Modifier.align(Alignment.BottomStart).padding(start = 20.dp, bottom = 16.dp)) {
+            Text("${m.temp.roundToInt()}°", fontSize = numberSp.sp, lineHeight = (numberSp * 1.02f).sp, fontWeight = FontWeight.Light, color = ink, maxLines = 1, softWrap = false)
+            Text(m.condition.label, fontSize = 20.sp, color = ink, maxLines = 1)
+            Text(
+                when {
+                    m.precip != null && m.precip >= 10 -> "Lluvia ${m.precip}%"
+                    today != null -> "Máx ${today.tempMax.roundToInt()}° · Mín ${today.tempMin.roundToInt()}°"
+                    else -> " "
+                },
+                fontSize = 12.sp, color = soft, maxLines = 1,
+            )
+        }
+    }
+}
+
+/** Selector de color al costado: una muestra por momento del día, con su temperatura chica. Tocar una la elige. */
+@Composable
+private fun Selector(f: Forecast, active: Int, modifier: Modifier, onPick: (Int) -> Unit) {
+    Column(modifier) {
+        Period.entries.forEachIndexed { i, p ->
+            val ink = inkOn(p.color)
+            val on = i == active
+            Column(
+                Modifier.weight(1f).fillMaxWidth().background(p.color).clickable { onPick(i) },
+                horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center,
+            ) {
+                Text("${momentAt(f, p.repHour).temp.roundToInt()}°", fontSize = if (on) 15.sp else 12.sp, fontWeight = if (on) FontWeight.Bold else FontWeight.Normal, color = ink.copy(alpha = if (on) 1f else 0.7f))
+                Box(Modifier.padding(top = 4.dp).size(if (on) 6.dp else 0.dp).background(ink, RoundedCornerShape(50)))
             }
         }
     }
