@@ -144,6 +144,10 @@ fun WeatherApp(vm: WeatherViewModel) {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun MainContent(state: UiState, version: String, style: BonaStyle, onSearch: () -> Unit, onSettings: () -> Unit, onRefresh: () -> Unit) {
+    if (style.bands) {
+        BandsMain(state, version, style, onSearch, onSettings, onRefresh)
+        return
+    }
     PullToRefreshBox(isRefreshing = state.refreshing, onRefresh = onRefresh, modifier = Modifier.fillMaxSize()) {
         Column(
             Modifier.fillMaxSize().verticalScroll(rememberScrollState()).statusBarsPadding().navigationBarsPadding()
@@ -222,7 +226,7 @@ private fun Hero(f: Forecast, sky: SkyState, style: BonaStyle) {
 }
 
 @Composable
-private fun HourlyCard(f: Forecast, style: BonaStyle) {
+internal fun HourlyCard(f: Forecast, style: BonaStyle) {
     val now = f.current.time.withMinute(0).withSecond(0).withNano(0)
     val hours = f.hourly.filter { !it.time.isBefore(now) }.take(25)
     PaperCard("Próximas horas") {
@@ -242,7 +246,7 @@ private fun HourlyCard(f: Forecast, style: BonaStyle) {
 }
 
 @Composable
-private fun DailyCard(f: Forecast, style: BonaStyle) {
+internal fun DailyCard(f: Forecast, style: BonaStyle) {
     val days = f.daily.take(8)
     val lo = days.minOf { it.tempMin }
     val hi = days.maxOf { it.tempMax }
@@ -282,7 +286,7 @@ private fun DayRow(d: DailyPoint, isToday: Boolean, lo: Double, hi: Double, styl
 }
 
 @Composable
-private fun DetailsGrid(f: Forecast, style: BonaStyle) {
+internal fun DetailsGrid(f: Forecast, style: BonaStyle) {
     val c = f.current
     val today = f.daily.firstOrNull()
     val items = buildList {
@@ -362,7 +366,7 @@ private fun uvLabel(uv: Double) = when {
     else -> "Extremo (${uv.roundToInt()})"
 }
 
-private fun updatedAgo(f: Forecast): String {
+internal fun updatedAgo(f: Forecast): String {
     val min = ((System.currentTimeMillis() - f.fetchedAtMillis) / 60_000).toInt()
     return when {
         min < 1 -> "recién"

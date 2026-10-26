@@ -30,6 +30,8 @@ data class BonaStyle(
     val twiBottom: Color,
     val overcast: Color,
     val cloud: Color,
+    /** Diseño "Franjas": número grande, franjas por momento del día y deslizar para recorrer las horas. */
+    val bands: Boolean = false,
 )
 
 val STYLES = listOf(
@@ -67,6 +69,14 @@ val STYLES = listOf(
         accent = Color(0xFFC98B4A), line = Color(0xFF5A4636), water = Color(0xFF86B3CC), ruled = false,
         dayTop = Color(0xFF8C5A34), dayBottom = Color(0xFFC79A62), nightTop = Color(0xFF0F0A07), nightBottom = Color(0xFF2B1D15),
         twiTop = Color(0xFF4A2C26), twiBottom = Color(0xFFC27440), overcast = Color(0xFF6E5E4E), cloud = Color(0xFFD8C7A5),
+    ),
+    BonaStyle(
+        id = "franjas", name = "Franjas", tagline = "Mañana, tarde y noche en colores; deslizá el número", dark = false,
+        paper = Color(0xFFF1ECE2), card = Color(0xFFF8F4EC), ink = Color(0xFF2B2420), inkSoft = Color(0xFF7A6D63),
+        accent = Color(0xFF8E4B40), line = Color(0xFFD9CFC0), water = Color(0xFF4A6F8A), ruled = false,
+        dayTop = Color(0xFFE6C597), dayBottom = Color(0xFFD99560), nightTop = Color(0xFF4F3C3E), nightBottom = Color(0xFF8E4B40),
+        twiTop = Color(0xFF8E4B40), twiBottom = Color(0xFFD99560), overcast = Color(0xFFB7A58C), cloud = Color(0xFFFFF1D6),
+        bands = true,
     ),
 )
 
