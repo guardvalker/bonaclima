@@ -44,6 +44,8 @@ import androidx.compose.animation.core.FastOutSlowInEasing
 import kotlinx.coroutines.Job
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.graphics.drawscope.clipRect
 import kotlinx.coroutines.launch
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -250,16 +252,13 @@ fun BandsMain(state: UiState, version: String, style: BonaStyle, onSearch: () ->
                         val i0 = p.toInt().coerceIn(0, 3)
                         val i1 = (i0 + 1).coerceAtMost(3)
                         val fr = p - i0
-                        val a0 = momentOf(i0)
-                        val a1 = momentOf(i1)
-                        val near = if (fr < 0.5f) a0 else a1
-                        val m = Moment(a0.temp + (a1.temp - a0.temp) * fr, near.condition, near.isDay, near.precip)
-                        val hour = hourOf(i0) + (hourOf(i1) - hourOf(i0)) * fr
-                        Panel(
-                            Period.entries[dominant], m, f, lerpColor(Period.entries[i0].color, Period.entries[i1].color, fr),
-                            dominant != currentIdx, hour, clock, Modifier.weight(1f).fillMaxSize(),
-                            onReset = { goTo(currentIdx) },
-                        )
+                        // Barrido vertical: la franja que entra empuja una línea de color sobre la otra (texto incluido, con su propio contraste).
+                        Box(Modifier.weight(1f).fillMaxSize()) {
+                            Panel(i0, momentOf(i0), f, i0 != currentIdx, hourOf(i0), clock, Modifier.fillMaxSize().clipBand(0f, 1f - fr)) { goTo(currentIdx) }
+                            if (fr > 0.001f && i1 != i0) {
+                                Panel(i1, momentOf(i1), f, i1 != currentIdx, hourOf(i1), clock, Modifier.fillMaxSize().clipBand(1f - fr, 1f)) { goTo(currentIdx) }
+                            }
+                        }
                         Selector(f, dominant, Modifier.width(52.dp).fillMaxSize()) { goTo(it) }
                     }
                     Column(Modifier.padding(horizontal = 16.dp, vertical = 16.dp).navigationBarsPadding(), verticalArrangement = Arrangement.spacedBy(16.dp)) {
@@ -278,12 +277,18 @@ fun BandsMain(state: UiState, version: String, style: BonaStyle, onSearch: () ->
     }
 }
 
+private fun Modifier.clipBand(from: Float, to: Float) = drawWithContent {
+    clipRect(0f, size.height * from, size.width, size.height * to) { this@drawWithContent.drawContent() }
+}
+
 /** Panel único: número y escena siempre en el mismo lugar; solo cambian el color, los valores y el nombre del momento. */
 @Composable
 private fun Panel(
-    p: Period, m: Moment, f: Forecast, color: Color, scrubbing: Boolean, hour: Float, clock: State<Float>,
+    idx: Int, m: Moment, f: Forecast, scrubbing: Boolean, hour: Float, clock: State<Float>,
     modifier: Modifier, onReset: () -> Unit,
 ) {
+    val p = Period.entries[idx]
+    val color = p.color
     val ink = inkOn(color)
     val soft = ink.copy(alpha = 0.78f)
     val today = f.daily.firstOrNull()
@@ -294,9 +299,7 @@ private fun Panel(
             fontSize = 11.sp, letterSpacing = 1.4.sp, fontWeight = FontWeight.Bold, color = soft, maxLines = 1, softWrap = false,
             modifier = Modifier.padding(start = 20.dp, top = 16.dp).then(if (scrubbing) Modifier.clickable(onClick = onReset) else Modifier),
         )
-        Crossfade(m.condition to m.isDay, animationSpec = tween(350), label = "scene", modifier = Modifier.align(Alignment.TopEnd).padding(top = 14.dp, end = 12.dp).size(SCENE)) { (c, day) ->
-            FlatScene(c, day, { clock.value }, Modifier.fillMaxSize())
-        }
+        FlatScene(m.condition, m.isDay, { clock.value }, Modifier.align(Alignment.TopEnd).padding(top = 14.dp, end = 12.dp).size(SCENE))
         Column(Modifier.align(Alignment.BottomStart).padding(start = 20.dp, bottom = 16.dp)) {
             Text("${m.temp.roundToInt()}°", fontSize = numberSp.sp, lineHeight = (numberSp * 1.02f).sp, fontWeight = FontWeight.Light, color = ink, maxLines = 1, softWrap = false)
             Text(m.condition.label, fontSize = 20.sp, color = ink, maxLines = 1)
