@@ -38,6 +38,10 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.State
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.animation.core.FastOutSlowInEasing
+import kotlinx.coroutines.Job
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.draw.alpha
 import kotlinx.coroutines.launch
@@ -97,18 +101,12 @@ private enum class Period(val label: String, val color: Color, val repHour: Floa
     Night("Noche", C_NIGHT, 23f),
 }
 
-/** Cuánto está abierto cada módulo a una hora (suma 1): se abre el de la franja actual y se cierra el anterior de a poco. */
-private val OPEN_STOPS = listOf(0f to 3, 5f to 3, 9f to 0, 15f to 1, 19.5f to 2, 23f to 3, 24f to 3)
-
-private fun openness(hour: Float): FloatArray {
-    val w = FloatArray(4)
-    val i = OPEN_STOPS.indexOfLast { it.first <= hour }.coerceIn(0, OPEN_STOPS.size - 2)
-    val (h0, a) = OPEN_STOPS[i]
-    val (h1, b) = OPEN_STOPS[i + 1]
-    val k = ((hour - h0) / (h1 - h0)).coerceIn(0f, 1f)
-    w[a] += 1 - k
-    w[b] += k
-    return w
+private fun periodIndex(hour: Float) = when {
+    hour < 6f -> 3
+    hour < 12f -> 0
+    hour < 18f -> 1
+    hour < 21f -> 2
+    else -> 3
 }
 
 private fun inkOn(c: Color) = if (c.luminance() > 0.33f) INK_DARK else INK_CREAM
@@ -135,7 +133,6 @@ private fun hourLabel(hour: Float): String {
     return "%02d:%02d".format(h, m)
 }
 
-private val STEP = 0.35f
 private val SCENE = 92.dp
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -171,35 +168,45 @@ fun BandsMain(state: UiState, version: String, style: BonaStyle, onSearch: () ->
                         return@Column
                     }
                     val nowHour = f.current.time.hour + f.current.time.minute / 60f
-                    val currentIdx = openness(nowHour).let { w -> w.indices.maxBy { w[it] } }
+                    val currentIdx = periodIndex(nowHour)
                     val scope = rememberCoroutineScope()
-                    val hourAnim = remember { Animatable(nowHour) }
-                    // null = mostrando el momento actual; si no, índice de la franja elegida.
-                    var selected by rememberSaveable { mutableStateOf<Int?>(null) }
-                    val scrubbing = selected != null
-                    val hour = if (scrubbing) hourAnim.value else nowHour
+                    var selected by rememberSaveable { mutableIntStateOf(currentIdx) }
+                    // Posición en "índices de franja" (0 = Mañana … 3 = Noche): una sola animación, sin estados intermedios por hora.
+                    val pos = remember { Animatable(selected.toFloat()) }
+                    var drag by remember { mutableFloatStateOf(0f) }
+                    val job = remember { arrayOfNulls<Job>(1) }
+                    val p = (pos.value + drag).coerceIn(0f, 3f)
+                    val dominant = p.roundToInt().coerceIn(0, 3)
 
                     fun hourOf(idx: Int) = if (idx == currentIdx) nowHour else Period.entries[idx].repHour
-                    fun select(idx: Int) {
-                        val from = selected
-                        selected = if (idx == currentIdx) null else idx
-                        scope.launch {
-                            if (from == null) hourAnim.snapTo(nowHour)
-                            hourAnim.animateTo(hourOf(idx), tween(380))
+                    fun momentOf(idx: Int) =
+                        if (idx == currentIdx) Moment(f.current.temperature, f.current.condition, f.current.isDay, null)
+                        else momentAt(f, Period.entries[idx].repHour)
+                    /** Anima hasta la franja [idx] desde donde esté (incluido lo que el dedo haya arrastrado). */
+                    fun goTo(idx: Int) {
+                        val from = (pos.value + drag).coerceIn(0f, 3f)
+                        drag = 0f
+                        selected = idx
+                        job[0]?.cancel()
+                        job[0] = scope.launch {
+                            pos.snapTo(from)
+                            pos.animateTo(idx.toFloat(), tween(300, easing = FastOutSlowInEasing))
                         }
                     }
 
                     val haptic = LocalHapticFeedback.current
-                    LaunchedEffect(selected) { if (selected != null) haptic.performHapticFeedback(HapticFeedbackType.SegmentFrequentTick) }
+                    var lastSelected by remember { mutableIntStateOf(selected) }
+                    LaunchedEffect(selected) {
+                        if (selected != lastSelected) haptic.performHapticFeedback(HapticFeedbackType.SegmentFrequentTick)
+                        lastSelected = selected
+                    }
 
-                    val thresholdPx = with(LocalDensity.current) { 44.dp.toPx() }
-                    val w = openness(hour)
-                    val dominant = w.indices.maxBy { w[it] }
+                    val thresholdPx = with(LocalDensity.current) { 56.dp.toPx() }
                     val panelH = screenH * 0.46f
 
-                    // Deslizar sobre las franjas "corre" el módulo abierto: un gesto mueve solo hasta la franja contigua, con snap.
+                    // Un gesto sobre el panel mueve solo hasta la franja contigua: acompaña un poco al dedo y salta solo al pasar el umbral.
                     Row(
-                        Modifier.fillMaxWidth().height(panelH).pointerInput(currentIdx, nowHour) {
+                        Modifier.fillMaxWidth().height(panelH).pointerInput(currentIdx) {
                             awaitEachGesture {
                                 val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
                                 val slop = viewConfiguration.touchSlop
@@ -207,6 +214,8 @@ fun BandsMain(state: UiState, version: String, style: BonaStyle, onSearch: () ->
                                 var acc = 0f
                                 var dragging = false
                                 var fired = false
+                                val base = selected
+                                job[0]?.cancel()
                                 while (true) {
                                     val ev = awaitPointerEvent(PointerEventPass.Initial)
                                     val ch = ev.changes.firstOrNull { it.id == down.id } ?: break
@@ -218,35 +227,40 @@ fun BandsMain(state: UiState, version: String, style: BonaStyle, onSearch: () ->
                                         dragging = true
                                         acc = total
                                     } else acc += dy
-                                    // Se consume en la pasada inicial: la pantalla no scrollea mientras se arrastra sobre las franjas.
+                                    // Se consume en la pasada inicial: la pantalla no scrollea mientras se arrastra sobre el panel.
                                     ch.consume()
                                     if (fired) continue
-                                    val base = selected ?: currentIdx
                                     // Dedo hacia abajo = franja anterior, hacia arriba = la siguiente.
                                     val target = base + if (acc > 0) -1 else 1
-                                    if (target !in 0..3) continue
-                                    if (kotlin.math.abs(acc) >= thresholdPx) {
+                                    if (target !in 0..3) { drag = 0f; continue }
+                                    val k = (kotlin.math.abs(acc) / thresholdPx).coerceIn(0f, 1f)
+                                    if (k >= 1f) {
                                         fired = true
-                                        select(target)
+                                        goTo(target)
                                     } else {
-                                        val k = (kotlin.math.abs(acc) / thresholdPx).coerceIn(0f, 1f) * STEP
-                                        val h0 = hourOf(base)
-                                        scope.launch {
-                                            if (selected == null) { selected = base; hourAnim.snapTo(h0) }
-                                            hourAnim.snapTo(h0 + (hourOf(target) - h0) * k)
-                                        }
+                                        drag = (target - base) * k * 0.3f
                                     }
                                 }
-                                if (dragging && !fired) select(selected ?: currentIdx)
+                                if (!fired) {
+                                    if (dragging) goTo(base) else job[0] = null
+                                }
                             }
                         },
                     ) {
-                        val m = if (!scrubbing) Moment(f.current.temperature, f.current.condition, f.current.isDay, null) else momentAt(f, hour)
+                        val i0 = p.toInt().coerceIn(0, 3)
+                        val i1 = (i0 + 1).coerceAtMost(3)
+                        val fr = p - i0
+                        val a0 = momentOf(i0)
+                        val a1 = momentOf(i1)
+                        val near = if (fr < 0.5f) a0 else a1
+                        val m = Moment(a0.temp + (a1.temp - a0.temp) * fr, near.condition, near.isDay, near.precip)
+                        val hour = hourOf(i0) + (hourOf(i1) - hourOf(i0)) * fr
                         Panel(
-                            Period.entries[dominant], m, f, blendColor(w), scrubbing, hour, clock, Modifier.weight(1f).fillMaxSize(),
-                            onReset = { select(currentIdx) },
+                            Period.entries[dominant], m, f, lerpColor(Period.entries[i0].color, Period.entries[i1].color, fr),
+                            dominant != currentIdx, hour, clock, Modifier.weight(1f).fillMaxSize(),
+                            onReset = { goTo(currentIdx) },
                         )
-                        Selector(f, dominant, Modifier.width(52.dp).fillMaxSize()) { select(it) }
+                        Selector(f, dominant, Modifier.width(52.dp).fillMaxSize()) { goTo(it) }
                     }
                     Column(Modifier.padding(horizontal = 16.dp, vertical = 16.dp).navigationBarsPadding(), verticalArrangement = Arrangement.spacedBy(16.dp)) {
                         HourlyCard(f, style)
@@ -262,13 +276,6 @@ fun BandsMain(state: UiState, version: String, style: BonaStyle, onSearch: () ->
             }
         }
     }
-}
-
-/** Mezcla los colores de las franjas según cuánto pesa cada una a esta hora: el cambio de color es continuo. */
-private fun blendColor(w: FloatArray): Color {
-    var r = 0f; var g = 0f; var b = 0f
-    Period.entries.forEachIndexed { i, p -> r += p.color.red * w[i]; g += p.color.green * w[i]; b += p.color.blue * w[i] }
-    return Color(r.coerceIn(0f, 1f), g.coerceIn(0f, 1f), b.coerceIn(0f, 1f))
 }
 
 /** Panel único: número y escena siempre en el mismo lugar; solo cambian el color, los valores y el nombre del momento. */
