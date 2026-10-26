@@ -87,15 +87,13 @@ fun WeatherApp(vm: WeatherViewModel) {
     val state by vm.state.collectAsStateWithLifecycle()
     val style = styleById(state.styleId)
     var screen by rememberSaveable { mutableStateOf(MAIN) }
-    var heroDark by remember { mutableStateOf(false) }
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { vm.refreshIfStale(); vm.checkForAppUpdate() }
     BackHandler(enabled = screen != MAIN) { screen = if (screen == CHANGELOG_SCREEN) SETTINGS else MAIN }
 
     // Íconos de las barras del sistema según el estilo (oscuros sobre papel claro, claros sobre papel oscuro).
     val activity = LocalContext.current as ComponentActivity
-    val darkBars = style.dark || (style.bands && screen == MAIN && heroDark)
-    DisposableEffect(darkBars) {
-        val bars = if (darkBars) SystemBarStyle.dark(android.graphics.Color.TRANSPARENT)
+    DisposableEffect(style.dark) {
+        val bars = if (style.dark) SystemBarStyle.dark(android.graphics.Color.TRANSPARENT)
         else SystemBarStyle.light(android.graphics.Color.TRANSPARENT, android.graphics.Color.TRANSPARENT)
         activity.enableEdgeToEdge(statusBarStyle = bars, navigationBarStyle = bars)
         onDispose {}
@@ -135,7 +133,7 @@ fun WeatherApp(vm: WeatherViewModel) {
                             onCheckUpdate = { vm.checkForAppUpdate(manual = true) }, onChangelog = { screen = CHANGELOG_SCREEN },
                         )
                         CHANGELOG_SCREEN -> ChangelogScreen(vm.version, onBack = { screen = SETTINGS })
-                        else -> MainContent(state, vm.version, style, onSearch = { screen = SEARCH }, onSettings = { screen = SETTINGS }, onRefresh = vm::refresh, onHeroDark = { heroDark = it })
+                        else -> MainContent(state, vm.version, style, onSearch = { screen = SEARCH }, onSettings = { screen = SETTINGS }, onRefresh = vm::refresh)
                     }
                 }
             }
@@ -145,9 +143,9 @@ fun WeatherApp(vm: WeatherViewModel) {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun MainContent(state: UiState, version: String, style: BonaStyle, onSearch: () -> Unit, onSettings: () -> Unit, onRefresh: () -> Unit, onHeroDark: (Boolean) -> Unit) {
+private fun MainContent(state: UiState, version: String, style: BonaStyle, onSearch: () -> Unit, onSettings: () -> Unit, onRefresh: () -> Unit) {
     if (style.bands) {
-        BandsMain(state, version, style, onSearch, onSettings, onRefresh, onHeroDark)
+        BandsMain(state, version, style, onSearch, onSettings, onRefresh)
         return
     }
     PullToRefreshBox(isRefreshing = state.refreshing, onRefresh = onRefresh, modifier = Modifier.fillMaxSize()) {
