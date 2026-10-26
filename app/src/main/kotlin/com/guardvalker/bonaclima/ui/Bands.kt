@@ -15,6 +15,10 @@ import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.itemsIndexed
+import java.time.LocalDate
+import java.time.LocalDateTime
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
@@ -262,7 +266,7 @@ fun BandsMain(state: UiState, version: String, style: BonaStyle, onSearch: () ->
                         Selector(f, dominant, Modifier.width(62.dp).fillMaxSize()) { goTo(it) }
                     }
                     Column(Modifier.padding(horizontal = 16.dp, vertical = 16.dp).navigationBarsPadding(), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                        HourlyCard(f, style)
+                        BandsHourlyCard(f, style)
                         DailyCard(f, style)
                         DetailsGrid(f, style)
                         Text(
@@ -336,6 +340,74 @@ private fun Selector(f: Forecast, active: Int, modifier: Modifier, onPick: (Int)
                     fontWeight = if (on) FontWeight.Bold else FontWeight.Normal, color = ink.copy(alpha = a),
                 )
                 Text(p.range, fontSize = 9.sp, color = ink.copy(alpha = a * 0.85f), maxLines = 1, softWrap = false)
+            }
+        }
+    }
+}
+
+// Próximas horas: cada hora se tiñe con el color de su momento del día y sobre ellas corre la curva del sol.
+
+private fun hourOfDay(t: LocalDateTime?) = t?.let { it.hour + it.minute / 60f }
+
+private fun sunHours(f: Forecast, date: LocalDate): Pair<Float, Float> {
+    val d = f.daily.firstOrNull { it.date == date }
+    return (hourOfDay(d?.sunrise) ?: 6.5f) to (hourOfDay(d?.sunset) ?: 19.5f)
+}
+
+/** Altura del sol: 0..1 de día (arco entre salida y puesta), 0..-0.55 de noche (por debajo del horizonte). */
+private fun sunAltitude(hour: Float, sunrise: Float, sunset: Float): Float {
+    if (hour in sunrise..sunset) return sin(PI.toFloat() * (hour - sunrise) / (sunset - sunrise))
+    val nightLen = 24f - (sunset - sunrise)
+    val since = if (hour > sunset) hour - sunset else hour + 24f - sunset
+    return -0.55f * sin(PI.toFloat() * (since / nightLen).coerceIn(0f, 1f))
+}
+
+@Composable
+internal fun BandsHourlyCard(f: Forecast, style: BonaStyle) {
+    val now = f.current.time.withMinute(0).withSecond(0).withNano(0)
+    val hours = f.hourly.filter { !it.time.isBefore(now) }.take(25)
+    val alts = hours.map { h -> sunHours(f, h.time.toLocalDate()).let { (sr, ss) -> sunAltitude(h.time.hour.toFloat(), sr, ss) } }
+    PaperCard("Próximas horas") {
+        LazyRow {
+            itemsIndexed(hours) { i, h ->
+                val period = Period.entries[periodIndex(h.time.hour.toFloat())]
+                val startsPeriod = i == 0 || periodIndex(hours[i - 1].time.hour.toFloat()) != periodIndex(h.time.hour.toFloat())
+                val first = i == 0
+                Column(Modifier.width(64.dp).background(period.color.copy(alpha = 0.3f)).padding(vertical = 8.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text(
+                        if (startsPeriod) period.label.uppercase(AR) else " ", fontSize = 8.sp, letterSpacing = 0.4.sp, fontWeight = FontWeight.Bold,
+                        color = style.ink.copy(alpha = 0.6f), maxLines = 1, softWrap = false,
+                    )
+                    Text(
+                        if (first) "Ahora" else "%02d:00".format(h.time.hour), fontSize = 13.sp,
+                        fontWeight = if (first) FontWeight.Bold else FontWeight.Normal, color = if (first) style.accent else style.inkSoft,
+                    )
+                    Canvas(Modifier.fillMaxWidth().height(56.dp)) {
+                        val prev = alts.getOrNull(i - 1) ?: alts[i]
+                        val next = alts.getOrNull(i + 1) ?: alts[i]
+                        fun y(alt: Float) = size.height / 2f - alt * size.height * 0.38f
+                        // Horizonte y curva del sol, continuas entre una hora y la siguiente.
+                        drawLine(style.ink.copy(alpha = 0.1f), Offset(0f, size.height / 2f), Offset(size.width, size.height / 2f), strokeWidth = 1f)
+                        val y0 = y((prev + alts[i]) / 2f)
+                        val y1 = y((alts[i] + next) / 2f)
+                        val curve = Path().apply {
+                            moveTo(0f, y0)
+                            // Punto de control elegido para que la curva pase justo por el marcador de esta hora.
+                            quadraticTo(size.width / 2f, 2f * y(alts[i]) - (y0 + y1) / 2f, size.width, y1)
+                        }
+                        drawPath(curve, style.ink.copy(alpha = 0.22f), style = Stroke(1.5.dp.toPx(), cap = StrokeCap.Round))
+                        val c = Offset(size.width / 2f, y(alts[i]))
+                        val day = alts[i] >= 0f
+                        val r = (if (first) 6.dp else 3.5.dp).toPx()
+                        if (first) drawCircle((if (day) SUN else MOON).copy(alpha = 0.3f), r * 2.3f, c)
+                        drawCircle(if (day) SUN else MOON, r, c)
+                        drawCircle(SUN_EDGE.copy(alpha = 0.45f), r, c, style = Stroke(1.dp.toPx()))
+                    }
+                    WeatherGlyph(h.condition, h.isDay, style.ink, 24.dp)
+                    val pr = h.precipProbability ?: 0
+                    Text(if (pr >= 10) "$pr%" else " ", fontSize = 11.sp, color = style.water)
+                    Text("${h.temperature.roundToInt()}°", fontSize = 18.sp, fontWeight = FontWeight.Medium, color = style.ink)
+                }
             }
         }
     }

@@ -5,6 +5,13 @@ class ChangelogEntry(val version: String, val date: String, val items: List<Stri
 /** Historial de cambios que muestra la app. Agregar una entrada arriba en cada release. */
 val CHANGELOG = listOf(
     ChangelogEntry(
+        "0.3.10", "2026-10-26",
+        listOf(
+            "Franjas: las próximas horas se tiñen con el color de su momento del día (mañana, tarde, tardecita, noche) y muestran el nombre donde empieza cada uno.",
+            "Curva suave del sol de fondo: marca la posición del sol (o la luna) en cada hora, con el horizonte y la hora actual resaltada como \"Ahora\".",
+        ),
+    ),
+    ChangelogEntry(
         "0.3.9", "2026-10-26",
         listOf(
             "Franjas: cada muestra del selector ahora dice su nombre, la temperatura y el rango de horas (ej. Tarde 12° 12–18 h).",
